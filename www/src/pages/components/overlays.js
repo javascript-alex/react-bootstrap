@@ -5,10 +5,13 @@ import { css } from 'astroturf';
 import LinkedHeading from '../../components/LinkedHeading';
 import ComponentApi from '../../components/ComponentApi';
 import ReactPlayground from '../../components/ReactPlayground';
+import Callout from '../../components/Callout';
 
 import Disabled from '../../examples/Overlays/Disabled';
 import Overlay from '../../examples/Overlays/Overlay';
-import OverlayTrigger from '../../examples/Overlays/OverlayTrigger';
+import OverlayTrigger from '../../examples/Overlays/Trigger';
+import TriggerRenderProp from '../../examples/Overlays/TriggerRenderProp';
+import TriggerGlobalTimer from '../../examples/Overlays/TriggerGlobalTimer';
 import PopoverBasic from '../../examples/Overlays/PopoverBasic';
 import PopoverContained from '../../examples/Overlays/PopoverContained';
 import PopoverPositioned from '../../examples/Overlays/PopoverPositioned';
@@ -91,7 +94,7 @@ export default withLayout(function TooltipSection({ data }) {
       </p>
       <ReactPlayground codeText={Overlay} />
 
-      <LinkedHeading h="3" id="overlay-trigger">
+      <LinkedHeading h="2" id="overlay-trigger">
         OverlayTrigger
       </LinkedHeading>
       <p>
@@ -115,6 +118,37 @@ export default withLayout(function TooltipSection({ data }) {
       </p>
 
       <ReactPlayground codeText={OverlayTrigger} />
+
+      <LinkedHeading h="3" id="customizing-trigger-behavior">
+        Customizing trigger behavior
+      </LinkedHeading>
+
+      <p>
+        For more advanced behaviors <code>{'<OverlayTrigger>'}</code> accepts a
+        function child that passes in the injected <code>ref</code> and event
+        handlers that coorespond to the configured <code>trigger</code> prop.
+      </p>
+      <p>
+        You can manually apply the props to any element you want or split them
+        up. The example below shows how to position the overlay to a different
+        element than the one that triggers its visibility.
+      </p>
+      <Callout>
+        <strong>Pro Tip:</strong> Using the function form of OverlayTrigger
+        avoids a <code>React.findDOMNode</code> call, for those trying to be
+        strict mode compliant.
+      </Callout>
+      <ReactPlayground codeText={TriggerRenderProp} />
+
+      <LinkedHeading h="3" id="global-timer">
+        Shared delays
+      </LinkedHeading>
+      <p>
+        For groups of controls with tooltips using <code>globalDelay</code> will
+        unify the show and hide delays of tooltips such that the show delay is
+        skipped when quickly switching between triggers with tooltips.
+      </p>
+      <ReactPlayground codeText={TriggerGlobalTimer} />
 
       <LinkedHeading h="2" id="tooltips">
         Tooltips

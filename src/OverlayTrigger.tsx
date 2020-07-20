@@ -1,12 +1,11 @@
 import contains from 'dom-helpers/contains';
 import PropTypes from 'prop-types';
 import React, { cloneElement, useCallback, useRef } from 'react';
-import useTimeout from '@restart/hooks/useTimeout';
 import safeFindDOMNode from 'react-overlays/safeFindDOMNode';
 import warning from 'warning';
 import { useUncontrolledProp } from 'uncontrollable';
-import { Modifier } from 'react-overlays/esm/usePopper';
 import Overlay, { OverlayChildren, OverlayProps } from './Overlay';
+import useDelayToggleCallback from './useDelayToggleCallback';
 
 export type OverlayTriggerType = 'hover' | 'click' | 'focus';
 
@@ -16,11 +15,18 @@ export type OverlayInjectedProps = {
   onFocus?: (...args: any[]) => any;
 };
 
+export type OverlayTriggerRenderProps = OverlayInjectedProps & {
+  ref: React.Ref<any>;
+};
+
 export interface OverlayTriggerProps
   extends Omit<OverlayProps, 'children' | 'target'> {
-  children: React.ReactElement;
+  children:
+    | React.ReactElement
+    | ((props: OverlayTriggerRenderProps) => React.ReactNode);
   trigger?: OverlayTriggerType | OverlayTriggerType[];
   delay?: OverlayDelay;
+  globalDelay?: boolean;
   show?: boolean;
   defaultShow?: boolean;
   onToggle?: (nextShow: boolean) => void;
@@ -37,23 +43,17 @@ class RefHolder extends React.Component {
   }
 }
 
-function normalizeDelay(delay?: OverlayDelay) {
-  return delay && typeof delay === 'object'
-    ? delay
-    : {
-        show: delay,
-        hide: delay,
-      };
-}
+const normalizeDelay = (delay: OverlayDelay): [number, number] =>
+  typeof delay === 'object' ? [delay.show, delay.hide] : [delay, delay];
 
 // Simple implementation of mouseEnter and mouseLeave.
 // React's built version is broken: https://github.com/facebook/react/issues/4251
 // for cases when the trigger is disabled and mouseOut/Over can cause flicker
 // moving from one child element to another.
 function handleMouseOverOut(
-  handler: (...args: any[]) => any,
+  handler: (...args: [React.MouseEvent, ...any[]]) => any,
   args: [React.MouseEvent, ...any[]],
-  relatedNative,
+  relatedNative: 'fromElement' | 'toElement',
 ) {
   const [e] = args;
   const target = e.currentTarget;
@@ -175,22 +175,26 @@ function OverlayTrigger({
   defaultShow = false,
   onToggle,
 
-  delay: propsDelay,
+  delay,
+  globalDelay = false,
   placement,
   flip = placement && placement.indexOf('auto') !== -1,
   ...props
 }: OverlayTriggerProps) {
   const triggerNodeRef = useRef(null);
-  const timeout = useTimeout();
-  const hoverStateRef = useRef<string>('');
 
   const [show, setShow] = useUncontrolledProp(propsShow, defaultShow, onToggle);
 
-  const delay = normalizeDelay(propsDelay);
+  const debouncedSetShow = useDelayToggleCallback(
+    delay == null ? null : normalizeDelay(delay),
+    setShow,
+    globalDelay,
+  );
 
-  const child = React.Children.only(children);
-
-  const { onFocus, onBlur, onClick } = child.props;
+  const { onFocus, onBlur, onClick } =
+    typeof children !== 'function'
+      ? React.Children.only(children).props
+      : ({} as any);
 
   const getTarget = useCallback(
     () => safeFindDOMNode(triggerNodeRef.current),
@@ -198,37 +202,17 @@ function OverlayTrigger({
   );
 
   const handleShow = useCallback(() => {
-    timeout.clear();
-    hoverStateRef.current = 'show';
-
-    if (!delay.show) {
-      setShow(true);
-      return;
-    }
-
-    timeout.set(() => {
-      if (hoverStateRef.current === 'show') setShow(true);
-    }, delay.show);
-  }, [delay.show, setShow, timeout]);
+    debouncedSetShow(true);
+  }, [debouncedSetShow]);
 
   const handleHide = useCallback(() => {
-    timeout.clear();
-    hoverStateRef.current = 'hide';
-
-    if (!delay.hide) {
-      setShow(false);
-      return;
-    }
-
-    timeout.set(() => {
-      if (hoverStateRef.current === 'hide') setShow(false);
-    }, delay.hide);
-  }, [delay.hide, setShow, timeout]);
+    debouncedSetShow(false);
+  }, [debouncedSetShow]);
 
   const handleFocus = useCallback(
     (...args: any[]) => {
       handleShow();
-      if (onFocus) onFocus(...args);
+      onFocus?.(...args);
     },
     [handleShow, onFocus],
   );
@@ -236,7 +220,7 @@ function OverlayTrigger({
   const handleBlur = useCallback(
     (...args: any[]) => {
       handleHide();
-      if (onBlur) onBlur(...args);
+      onBlur?.(...args);
     },
     [handleHide, onBlur],
   );
@@ -263,34 +247,6 @@ function OverlayTrigger({
     [handleHide],
   );
 
-  // We add aria-describedby in the case where the overlay is a role="tooltip"
-  // for other cases describedby isn't appropriate (e.g. a popover with inputs) so we don't add it.
-  const ariaModifier: Modifier<'ariaDescribedBy', Record<string, unknown>> = {
-    name: 'ariaDescribedBy',
-    enabled: true,
-    phase: 'afterWrite',
-    effect: ({ state }) => {
-      return () => {
-        if ('removeAttribute' in state.elements.reference)
-          state.elements.reference.removeAttribute('aria-describedby');
-      };
-    },
-    fn: ({ state }) => {
-      const { popper, reference } = state.elements;
-
-      if (!show || !reference) return;
-
-      const role = popper.getAttribute('role') || '';
-      if (
-        popper.id &&
-        role.toLowerCase() === 'tooltip' &&
-        'setAttribute' in reference
-      ) {
-        reference.setAttribute('aria-describedby', popper.id);
-      }
-    },
-  };
-
   const triggers: string[] = trigger == null ? [] : [].concat(trigger as any);
   const triggerProps: any = {};
 
@@ -312,25 +268,23 @@ function OverlayTrigger({
     triggerProps.onMouseOut = handleMouseOut;
   }
 
-  // TODO: fix typing
-  // @ts-ignore
-  const modifiers = [ariaModifier].concat(popperConfig.modifiers || []);
   return (
     <>
-      <RefHolder ref={triggerNodeRef}>
-        {cloneElement(child as any, triggerProps)}
-      </RefHolder>
+      {typeof children === 'function' ? (
+        children({ ...triggerProps, ref: triggerNodeRef })
+      ) : (
+        <RefHolder ref={triggerNodeRef}>
+          {cloneElement(children as any, triggerProps)}
+        </RefHolder>
+      )}
       <Overlay
         {...props}
-        popperConfig={{
-          ...popperConfig,
-          modifiers,
-        }}
         show={show}
         onHide={handleHide}
-        target={getTarget as any}
-        placement={placement}
         flip={flip}
+        placement={placement}
+        popperConfig={popperConfig}
+        target={getTarget as any}
       >
         {overlay}
       </Overlay>
